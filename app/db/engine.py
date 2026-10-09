@@ -15,8 +15,12 @@ log = logging.getLogger(__name__)
 
 def _normalize_url(raw: str) -> tuple[str, dict]:
     """asyncpg needs `ssl=require` and rejects `sslmode`/`channel_binding`."""
+    if raw.startswith("postgres://"):
+        raw = raw.replace("postgres://", "postgresql://", 1)
     if raw.startswith("postgresql://"):
         raw = raw.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if not raw.startswith("postgresql"):
+        return raw, {}  # e.g. sqlite+aiosqlite for tests
 
     parsed = urlparse(raw)
     qs = parse_qs(parsed.query)
@@ -34,14 +38,12 @@ def _normalize_url(raw: str) -> tuple[str, dict]:
 
 _url, _connect_args = _normalize_url(settings.database_url)
 
-engine = create_async_engine(
-    _url,
-    connect_args=_connect_args,
-    pool_pre_ping=True,
-    pool_size=2,
-    max_overflow=2,
-    echo=False,
-)
+_engine_kw: dict = {"connect_args": _connect_args, "echo": False}
+if _url.startswith("postgresql"):
+    # Neon free tier: keep the pool tiny; pre-ping survives idle disconnects.
+    _engine_kw.update(pool_pre_ping=True, pool_size=2, max_overflow=2)
+
+engine = create_async_engine(_url, **_engine_kw)
 
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import text
 from telegram import Update
 
@@ -15,18 +16,17 @@ logging.basicConfig(
 )
 log = logging.getLogger("knowledgelake")
 
+MODULE = "m7"
 state: dict = {"ptb": None}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # DB
     try:
         await init_db()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.error("init_db failed: %s", e)
 
-    # Telegram
     ptb = build_application()
     await ptb.initialize()
     await ptb.start()
@@ -43,12 +43,12 @@ async def lifespan(app: FastAPI):
             )
             log.info("Telegram webhook registered: %s", settings.webhook_url)
         else:
-            log.warning("KL_MODE=webhook but WEBHOOK_URL is empty — not registering")
+            log.warning("KL_MODE=webhook but WEBHOOK_URL is empty - not registering")
     else:
         raise RuntimeError(f"Unknown KL_MODE: {settings.kl_mode}")
 
     state["ptb"] = ptb
-    log.info("KnowledgeLake up (module=m3)")
+    log.info("KnowledgeLake up (module=%s)", MODULE)
 
     try:
         yield
@@ -66,7 +66,7 @@ app = FastAPI(title="KnowledgeLake", lifespan=lifespan)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "knowledgelake", "module": "m3"}
+    return {"status": "ok", "service": "knowledgelake", "module": MODULE}
 
 
 @app.get("/ready")
@@ -74,10 +74,50 @@ async def ready():
     try:
         async with SessionLocal() as s:
             await s.execute(text("SELECT 1"))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("readiness check failed: %s", e)
         raise HTTPException(status_code=503, detail="db not ready")
     return {"status": "ready", "db": "ok"}
+
+
+class ClassifyIn(BaseModel):
+    message: str
+
+
+class MessageIn(BaseModel):
+    message: str
+    telegram_id: int
+
+
+def _check_debug(token: str | None) -> None:
+    """Debug endpoints are open locally; gated by WEBHOOK_SECRET when it's set."""
+    if settings.webhook_secret and token != settings.webhook_secret:
+        raise HTTPException(status_code=403, detail="bad debug token")
+
+
+@app.post("/debug/classify")
+async def debug_classify(body: ClassifyIn, x_debug_token: str | None = Header(default=None)):
+    _check_debug(x_debug_token)
+    from app.intents.classifier import classify
+    cls, meta = await classify(body.message)
+    return {"classification": cls.model_dump(), "meta": meta}
+
+
+@app.post("/debug/extract")
+async def debug_extract(body: ClassifyIn, x_debug_token: str | None = Header(default=None)):
+    _check_debug(x_debug_token)
+    from app.intents.extractor import extract
+    item, meta = await extract(body.message)
+    return {"item": item.model_dump(), "meta": meta}
+
+
+@app.post("/debug/message")
+async def debug_message(body: MessageIn, x_debug_token: str | None = Header(default=None)):
+    """Run the full Telegram flow (classify → route → DB) without Telegram."""
+    _check_debug(x_debug_token)
+    from app.intents.router import handle_message
+    reply = await handle_message(body.telegram_id, body.message)
+    return {"reply": reply}
 
 
 @app.post("/webhook/{secret}")

@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    image: jackdiva/knowledgelake:m3
+    image: jackdiva/knowledgelake:m7
     env_file: .env
     ports:
       - "8080:8080"

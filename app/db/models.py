@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     DateTime,
     ForeignKey,
@@ -12,6 +13,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# JSONB on Postgres (Neon), plain JSON elsewhere (SQLite in tests).
+JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -31,7 +35,7 @@ class User(Base):
 class UserContext(Base):
     __tablename__ = "user_context"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    goals: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    goals: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     current_focus: Mapped[str | None] = mapped_column(Text, nullable=True)
     energy_pref: Mapped[str | None] = mapped_column(String(16), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata")
@@ -73,7 +77,7 @@ class Item(Base):
     time_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     energy: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), index=True
     )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -110,7 +114,7 @@ class IntentLog(Base):
     model: Mapped[str] = mapped_column(String(64))
     provider: Mapped[str] = mapped_column(String(16))
     prompt_version: Mapped[str] = mapped_column(String(16), default="v1")
-    predicted: Mapped[dict] = mapped_column(JSONB)
+    predicted: Mapped[dict] = mapped_column(JSONType)
     confidence: Mapped[float | None] = mapped_column(nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
