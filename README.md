@@ -58,6 +58,12 @@ Just type naturally:
 | `find anything about dbt` | searches open + done items |
 | `show my queue` · `show my tags` · `what are my goals` | lists |
 | `done with terraform, what's next?` | several intents in one message |
+| `hi` / `good morning` | friendly hello + your open count, top pick and what you can do |
+| `thanks` / `bye` / `ok` / `👍` | short friendly reply (never saved as an item) |
+| `hi! add learn rust` | the greeting is ignored and the request is done |
+| `what's the weather?` / `tell me a joke` | politely redirected (shows related saved items if any) |
+
+A tap-able menu is shown under every reply: 🎯 Focus · 📋 Queue · 🏷 Tags · 🧭 Goals · ❓ Help.
 
 Commands work even if every LLM is down: `/add` `/queue` `/focus [topic]` `/done <#id|title>`
 `/search <words>` `/tags` `/context` `/setfocus <topic>` `/goal <goal>` `/energy <low|medium|high>` `/help`.

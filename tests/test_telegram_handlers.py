@@ -12,7 +12,7 @@ def make_update(text="hello", user_id=1, update_id=100):
     message = SimpleNamespace(text=text, reply_text=AsyncMock())
     return SimpleNamespace(
         update_id=update_id,
-        effective_user=SimpleNamespace(id=user_id, username="tester"),
+        effective_user=SimpleNamespace(id=user_id, username="tester", first_name="Jack"),
         effective_chat=SimpleNamespace(id=user_id),
         effective_message=message,
         message=message,
@@ -32,7 +32,7 @@ def routed(monkeypatch):
     """Capture what the handlers send to the router."""
     calls = []
 
-    async def fake_handle(telegram_id, text, *, username=None, update_id=None, forced=None, session_factory=None):
+    async def fake_handle(telegram_id, text, *, username=None, display_name=None, update_id=None, forced=None, session_factory=None):
         calls.append({"uid": telegram_id, "text": text, "update_id": update_id, "forced": forced})
         return "ROUTED"
 

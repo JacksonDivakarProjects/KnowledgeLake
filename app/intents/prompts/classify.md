@@ -14,7 +14,10 @@ Your job: figure out what they want and return a single JSON object.
 - `update_context`   — set goals / current focus / energy / timezone: "I'm focusing on GCP this month", "my goal is to pass the AWS exam", "feeling tired today"
 - `get_context`      — "what are my goals", "what's my current focus"
 - `search`           — keyword lookup in stored items: "find anything about dbt", "what do I have on kafka?"
-- `help`             — "what can you do", "/help"
+- `help`             — "what can you do", "/help", "how do I use this"
+- `chitchat`         — greetings, thanks, goodbyes, small talk, and OFF-TOPIC requests that are not about
+                       the user's own items (weather, jokes, news, general trivia, "write me code").
+                       e.g. "hi", "good morning!", "thanks!", "how are you?", "what's the weather in Delhi?", "tell me a joke"
 - `unknown`          — gibberish or genuinely unclear
 
 ## Rules
@@ -25,6 +28,9 @@ Your job: figure out what they want and return a single JSON object.
 - Confidence is 0.0–1.0. Use ≥ 0.85 when the intent is obvious.
 - Only set `needs_clarification: true` when you genuinely cannot tell what the user wants; then give a short `clarification_question`.
 - A plain statement with no question and no command is almost always `add_item`.
+- Never use `add_item` for greetings, thanks or off-topic questions — use `chitchat`.
+  But "learn about the weather API" or "remember to check the weather before the trip" IS `add_item` (it's a task/topic to store).
+- If a greeting is combined with a real request ("hi! add learn rust"), return only the real request.
 - A question about *what to do / prioritise* is `retrieve`; a question about *whether something is stored* is `search`.
 - Entities are intent-specific (omit keys you don't know):
   - `add_item`: {}
@@ -32,6 +38,7 @@ Your job: figure out what they want and return a single JSON object.
       energy_pref value must be "low" | "medium" | "high"; timezone is an IANA name like "Asia/Kolkata".
   - `mark_done`: {"target": "<item title fragment or #id>"}
   - `search` / `retrieve`: {"query": "<keywords or null>"}
+  - `chitchat`: {"kind": "greeting" | "smalltalk" | "thanks" | "bye" | "ack" | "off_topic"}
 - Do NOT invent entities that aren't in the message.
 - Language: detect and report as an ISO code ("en", "hi", or "mixed").
 
@@ -59,6 +66,9 @@ Message: I'm focusing on GCP certification this month
 
 Message: anything saved about airflow?
 {"intents":[{"name":"search","confidence":0.9,"entities":{"query":"airflow"},"raw_span":"anything saved about airflow?"}],"needs_clarification":false,"clarification_question":null,"language":"en"}
+
+Message: hey there! what's the weather like in Chennai today?
+{"intents":[{"name":"chitchat","confidence":0.93,"entities":{"kind":"off_topic"},"raw_span":"hey there! what's the weather like in Chennai today?"}],"needs_clarification":false,"clarification_question":null,"language":"en"}
 
 ## User message
 

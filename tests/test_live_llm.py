@@ -4,6 +4,7 @@
 
 Only LLM calls are made (no DB, no Telegram). Skipped by default.
 """
+import asyncio
 import os
 from pathlib import Path
 
@@ -21,6 +22,12 @@ pytestmark = [
 ]
 
 ENV = dotenv_values(Path(__file__).resolve().parents[1] / ".env")
+
+
+@pytest.fixture(autouse=True)
+async def _respect_rate_limit():
+    yield
+    await asyncio.sleep(2.5)  # Groq free tier is ~30 req/min
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +52,7 @@ async def test_groq_classifies(message, expected, monkeypatch):
     monkeypatch.setattr(settings, "kl_llm_provider_order", "groq")
     cls, meta = await classify(message)
     print(f"\n{message!r} -> {[(i.name, i.confidence, i.entities) for i in cls.intents]} via {meta}")
-    assert meta["provider"] == "groq"
+    assert meta["provider"] in ("groq", "rules")  # obvious messages never need the LLM
     assert {i.name for i in actionable(cls)} == expected
 
 
@@ -69,3 +76,24 @@ async def test_groq_extracts():
     assert meta["provider"] in ("groq", "nvidia")
     assert item.type == "action"
     assert item.time_hint and "friday" in item.time_hint.lower()
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("hey hope you're having a good day!", {"chitchat"}),
+        ("what's the weather like in Chennai today?", {"chitchat"}),
+        ("tell me a joke", {"chitchat"}),
+        ("who won the cricket match yesterday", {"chitchat"}),
+        ("hi! add learn rust ownership", {"add_item"}),
+        ("remember to check the weather before the trip", {"add_item"}),
+    ],
+)
+async def test_groq_routes_chitchat_and_off_topic(message, expected, monkeypatch):
+    monkeypatch.setattr(settings, "kl_llm_provider_order", "groq")
+    cls, meta = await classify(message)
+    print(f"\n{message!r} -> {[(i.name, i.confidence, i.entities) for i in cls.intents]}")
+    assert meta["provider"] in ("groq", "rules")  # obvious messages never need the LLM
+    names = {i.name for i in actionable(cls)}
+    # the router drops chitchat when a real request is present
+    assert (names - {"chitchat"} or names) == expected

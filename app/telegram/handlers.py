@@ -5,7 +5,7 @@ so they work even when every LLM provider is down.
 """
 import logging
 
-from telegram import Update
+from telegram import ReplyKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
@@ -23,11 +23,31 @@ START_TEXT = (
 )
 
 
+# Persistent quick-reply menu. Each button just sends its text, which the rules
+# fast-path routes without an LLM call (leading emoji is ignored).
+MENU_BUTTONS = [
+    ["🎯 What should I focus on?", "📋 Show my queue"],
+    ["🏷 Show my tags", "🧭 What are my goals"],
+    ["❓ Help"],
+]
+MENU = ReplyKeyboardMarkup(
+    MENU_BUTTONS,
+    resize_keyboard=True,
+    is_persistent=True,
+    input_field_placeholder="Type a topic, task or question…",
+)
+
+
 async def _reply(update: Update, text: str | None) -> None:
     if not text or update.effective_message is None:
         return
-    for chunk in chunk_message(text):
-        await update.effective_message.reply_text(chunk, disable_web_page_preview=True)
+    chunks = chunk_message(text)
+    for n, chunk in enumerate(chunks):
+        await update.effective_message.reply_text(
+            chunk,
+            disable_web_page_preview=True,
+            reply_markup=MENU if n == len(chunks) - 1 else None,
+        )
 
 
 async def _typing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,6 +72,7 @@ async def _dispatch(
         user.id,
         text,
         username=user.username,
+        display_name=user.first_name,
         update_id=update.update_id,
         forced=forced,
     )

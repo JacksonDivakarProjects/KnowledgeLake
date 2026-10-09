@@ -12,6 +12,7 @@ IntentName = Literal[
     "get_context",
     "search",
     "help",
+    "chitchat",
     "unknown",
 ]
 
@@ -33,6 +34,14 @@ _ALIASES = {
     "set_context": "update_context",
     "context": "get_context",
     "find": "search",
+    "greeting": "chitchat",
+    "greet": "chitchat",
+    "smalltalk": "chitchat",
+    "small_talk": "chitchat",
+    "chat": "chitchat",
+    "off_topic": "chitchat",
+    "offtopic": "chitchat",
+    "thanks": "chitchat",
 }
 
 

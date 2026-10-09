@@ -31,6 +31,8 @@ _MULTI_RE = re.compile(
 def _norm(text: str) -> str:
     t = text.strip().lower()
     t = re.sub(r"\s+", " ", t)
+    # Menu buttons / casual messages start with emoji: "🎯 What should I focus on?"
+    t = re.sub(r"^[^\w/#'\"]+", "", t)
     return t
 
 
@@ -220,9 +222,78 @@ def _add_item(t: str, raw: str) -> Intent | None:
     return None
 
 
+_CHITCHAT = (
+    ("greeting", re.compile(
+        r"^(h+i+|hey+|hello+|heya|hiya|yo|sup|hola|namaste|namaskar|vanakkam|howdy|greetings|"
+        r"good (morning|afternoon|evening|day)|morning|gm)"
+        r"( there| bot| buddy| friend| knowledgelake| again)?$")),
+    ("smalltalk", re.compile(
+        r"^(how are (you|u|things)|how'?s it going|how r u|how do you do|what'?s up|wh?a?ssup|"
+        r"who are you|what are you|are you (a bot|real|there|alive))( today| doing)?$")),
+    ("thanks", re.compile(
+        r"^(thanks?( you)?|thank u|thx|ty|tysm|cheers|much appreciated|appreciate it|great,? thanks)"
+        r"( so much| a lot| very much| bot| buddy)?$")),
+    ("bye", re.compile(r"^(bye+|bye bye|goodbye|good night|gn|see (you|ya)( later| soon)?|cya|later|ttyl|take care)$")),
+    ("ack", re.compile(
+        r"^(ok(ay)?|k+|cool|nice|great|awesome|got it|alright|sure|fine|perfect|sounds good|noted|"
+        r"lol|haha+|hmm+|yes|yeah|yep|no|nope|nah|wow|done deal|good)$")),
+)
+
+
+def _chitchat(t: str, raw: str) -> Intent | None:
+    s = _strip_punct(t)
+    for kind, rx in _CHITCHAT:
+        if rx.match(s):
+            return _intent("chitchat", FAST_CONFIDENCE, raw, kind=kind)
+    return None
+
+
+_OFF_TOPIC_RE = re.compile(
+    r"^(tell me (a |an |some )?(joke|story|fact|riddle|fun fact)s?"
+    r"|(what'?s|what is|how'?s|how is) the (weather|temperature|time|date|news|score)"
+    r"|(weather|temperature|news|score|stock price) (in|for|of|today|now)"
+    r"|who (won|is winning|is the (president|prime minister|ceo|pm))"
+    r"|what (time|day|date) is it"
+    r"|(sing|write|compose) (me )?(a |an )?(song|poem|story|essay|joke|limerick|rap)"
+    r"|(translate|calculate|solve) "
+    r"|play (a |some )?(game|music|song)"
+    r"|recommend (me )?(a |some )?(movie|song|restaurant|show)s?"
+    r"|are you (chatgpt|gpt|an ai|human)"
+    r")\b"
+)
+
+
+def _off_topic(t: str, raw: str) -> Intent | None:
+    if _OFF_TOPIC_RE.match(_strip_punct(t)):
+        return _intent("chitchat", FAST_CONFIDENCE, raw, kind="off_topic")
+    return None
+
+
+_GREETING_PREFIX_RE = re.compile(
+    r"^\W*(h+i+|hey+|hello+|heya|hiya|yo|hola|namaste|good (morning|afternoon|evening))"
+    r"( there| bot| buddy| friend)?[\s,!.:;\-]+(?=\w)",
+    re.IGNORECASE,
+)
+
+
+def strip_greeting(message: str) -> str:
+    """'hi! add learn rust' -> 'add learn rust'; a bare greeting is left alone."""
+    if _chitchat(_norm(message or ""), message or ""):
+        return message or ""  # "hello there", "hey bot" - the whole thing is the greeting
+    rest = _GREETING_PREFIX_RE.sub("", message or "", count=1).strip()
+    return rest or (message or "")
+
+
+def chitchat_kind(text: str) -> str | None:
+    hit = _chitchat(_norm(text), text)
+    return hit.entities.get("kind") if hit else None
+
+
 # Order matters: more specific matchers first.
 _MATCHERS = (
     _help,
+    _chitchat,
+    _off_topic,
     _list_tags,
     _view_queue,
     _get_context,
@@ -238,9 +309,19 @@ def _looks_multi(t: str) -> bool:
     return bool(_MULTI_RE.search(t)) or t.count("?") > 1 or len(re.findall(r"[.!?]\s+\w", t)) >= 1
 
 
+def _emoji_only(message: str | None) -> bool:
+    """No letters/digits, but at least one non-ASCII symbol (emoji). '??' or '...' don't count."""
+    m = (message or "").strip()
+    return bool(m) and not any(ch.isalnum() for ch in m) and any(ord(ch) > 127 for ch in m)
+
+
 def fast_path(message: str) -> Classification | None:
     """High-confidence single-intent classification, or None to defer to the LLM."""
+    message = strip_greeting(message)
     t = _norm(message)
+    if not t and _emoji_only(message):
+        # Only emoji ("👍", "🙂") - treat as a friendly acknowledgement.
+        return Classification(intents=[_intent("chitchat", FAST_CONFIDENCE, message.strip(), kind="ack")], source="rules")
     if not t or _looks_multi(t):
         return None
     for matcher in _MATCHERS:
@@ -275,7 +356,14 @@ _CLAUSE_SPLIT_RE = re.compile(
 
 def fallback(message: str) -> Classification:
     """Best-effort classification used when no LLM is reachable. Never raises."""
+    message = strip_greeting(message)
     t = _norm(message)
+    if not t and _emoji_only(message):
+        return Classification(
+            intents=[_intent("chitchat", FALLBACK_CONFIDENCE + 0.1, message.strip(), kind="ack")], source="fallback"
+        )
+    if not t and (message or "").strip():  # punctuation only: "??", "..."
+        return Classification(intents=[_intent("unknown", 0.9, message)], source="fallback")
     if not t:
         return Classification(
             intents=[],

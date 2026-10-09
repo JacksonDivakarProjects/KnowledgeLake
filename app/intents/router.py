@@ -54,8 +54,8 @@ Handler = Callable[[AsyncSession, User, Intent, str], Awaitable[str]]
 def _span(intent: Intent, text: str, multi: bool) -> str:
     """The part of the message this intent is about."""
     span = (intent.raw_span or "").strip()
-    if multi and span and len(span) >= 3:
-        return span
+    if span and len(span) >= 3 and (multi or span == rules.strip_greeting(text).strip()):
+        return span  # several intents, or "hi! add learn rust" -> "add learn rust"
     return text
 
 
@@ -197,6 +197,57 @@ async def _retrieve(session: AsyncSession, user: User, intent: Intent, text: str
     return retrieve_svc.format_ranked(ranked if items else [], query=query, query_matched=matched, ctx=ctx)
 
 
+SUGGESTIONS = (
+    "• type a topic or task to save it (e.g. \"learn kafka this weekend\")\n"
+    "• \"what should I focus on?\" - ranked picks\n"
+    "• \"show my queue\" - everything open\n"
+    "• \"I'm focusing on <topic>\" - set your context"
+)
+
+
+async def _top_pick(session: AsyncSession, user: User) -> tuple[int, str | None]:
+    """(open item count, 'Top pick right now: #id title' or None)."""
+    items = await item_svc.list_items(session, user.id, status="open")
+    if not items:
+        return 0, None
+    ctx = ctx_svc.view(await ctx_svc.get_context(session, user.id))
+    ranked, _ = retrieve_svc.rank_items(items, ctx, limit=1)
+    return len(items), f"#{ranked[0].item.id} {ranked[0].item.title}"
+
+
+async def _chitchat(session: AsyncSession, user: User, intent: Intent, text: str) -> str:
+    kind = intent.entities.get("kind") or rules.chitchat_kind(text) or "off_topic"
+    name = intent.entities.get("_name")
+    hello = f"Hi {name}! 👋" if name else "Hi! 👋"
+    count, top = await _top_pick(session, user)
+    status = (
+        f"You have {count} open item{'s' if count != 1 else ''}. Top pick right now: {top}."
+        if count else "Your queue is empty - send me a topic, task or note to get started."
+    )
+
+    if kind == "greeting":
+        return f"{hello} {status}\n\nWhat would you like to do?\n{SUGGESTIONS}"
+    if kind == "smalltalk":
+        return f"Doing great, thanks for asking! I'm your knowledge-queue assistant. {status}\n\n{SUGGESTIONS}"
+    if kind == "thanks":
+        return "Anytime! 🙌" + (f" Next up: {top}." if top else "")
+    if kind == "bye":
+        return "See you! 👋" + (f" {count} item{'s' if count != 1 else ''} will be waiting." if count else "")
+    if kind == "ack":
+        return "👍 Anything else? Type a topic to save it, or tap a button below."
+
+    # off_topic: check whether the user saved something related before refusing.
+    query = rules._strip_punct(text)
+    related = await item_svc.search(session, user.id, query, limit=5) if query else []
+    if related:
+        lines = "\n".join(item_svc.format_item_line(m.item, show_status=True) for m in related)
+        return f"That's outside what I do, but here's what you've saved that looks related:\n{lines}"
+    return (
+        "That's outside what I can help with - I manage your topics, tasks and notes.\n"
+        f"If it's something to remember, say \"add {query[:60]}\".\n\nI can:\n{SUGGESTIONS}"
+    )
+
+
 async def _help(session: AsyncSession, user: User, intent: Intent, text: str) -> str:
     return HELP_TEXT
 
@@ -211,6 +262,7 @@ HANDLERS: dict[str, Handler] = {
     "search": _search,
     "retrieve": _retrieve,
     "help": _help,
+    "chitchat": _chitchat,
 }
 
 FAILURE_REPLY = "Sorry - something went wrong on my side. Please try again in a moment."
@@ -245,6 +297,7 @@ async def handle_message(
     text: str,
     *,
     username: str | None = None,
+    display_name: str | None = None,
     update_id: int | None = None,
     forced: Intent | None = None,
     session_factory: async_sessionmaker | None = None,
@@ -280,7 +333,7 @@ async def handle_message(
             if not to_run:
                 reply = cls.clarification_question or "Not sure what you meant - can you rephrase? (/help)"
             else:
-                replies = await _run_intents(session, user, to_run, text, raw.id)
+                replies = await _run_intents(session, user, to_run, text, raw.id, display_name)
                 reply = "\n\n".join(r for r in replies if r) or "Done."
 
             await user_svc.mark_processed(session, update_id)
@@ -291,8 +344,15 @@ async def handle_message(
         return FAILURE_REPLY
 
 
-async def _run_intents(session: AsyncSession, user: User, intents: list[Intent], text: str, raw_id: int) -> list[str]:
+async def _run_intents(
+    session: AsyncSession, user: User, intents: list[Intent], text: str, raw_id: int, display_name: str | None = None
+) -> list[str]:
+    # Use per-intent spans whenever the message held several intents - even if
+    # we then drop the pleasantry, "hi! add learn rust" must save "learn rust".
     multi = len(intents) > 1
+    # "hi! add learn rust" - skip the pleasantry and just do the work.
+    if any(i.name != "chitchat" for i in intents):
+        intents = [i for i in intents if i.name != "chitchat"]
     replies: list[str] = []
     # mark_done before retrieve so "done with X, what's next?" ranks without X.
     order = {"update_context": 0, "add_item": 1, "mark_done": 2}
@@ -301,6 +361,8 @@ async def _run_intents(session: AsyncSession, user: User, intents: list[Intent],
         if handler is None:
             continue
         intent.entities.setdefault("_raw_id", raw_id)
+        if display_name:
+            intent.entities.setdefault("_name", display_name[:40])
         try:
             async with session.begin_nested():
                 replies.append(await handler(session, user, intent, _span(intent, text, multi)))

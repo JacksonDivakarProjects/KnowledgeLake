@@ -21,7 +21,7 @@ from app.llm.json_utils import parse_json_object
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "classify.md"
 _PROMPT_TEMPLATE = _PROMPT_PATH.read_text(encoding="utf-8")
 
@@ -41,6 +41,7 @@ _LABELS = {
     "get_context": "show your goals/focus",
     "search": "search your saved items",
     "help": "show help",
+    "chitchat": "just chat",
 }
 
 
@@ -105,7 +106,13 @@ def _clarify_question(cls: Classification) -> str:
         return f"Did you want me to {_LABELS[named[0].name]} or {_LABELS[named[1].name]}?"
     if len(named) == 1:
         return f"Just to be sure - should I {_LABELS[named[0].name]}?"
-    return "I didn't quite get that. You can store a note, ask \"what should I focus on\", or type /help."
+    return (
+        "I didn't quite get that. Here's what I can do:\n"
+        "• type a topic or task to save it\n"
+        "• \"what should I focus on?\" for ranked picks\n"
+        "• \"show my queue\" or \"I'm focusing on <topic>\"\n"
+        "Or tap a button below / type /help."
+    )
 
 
 def _competing(a: Intent, b: Intent) -> bool:
