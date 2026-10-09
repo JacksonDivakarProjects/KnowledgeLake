@@ -21,6 +21,7 @@ from app.services import items as item_svc
 from app.services import retrieve as retrieve_svc
 from app.services import users as user_svc
 from app.services.tags import list_tags_with_counts
+from app.services.text import clean_input
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +66,13 @@ async def _add_item(session: AsyncSession, user: User, intent: Intent, text: str
     extracted, meta = await extract(text, hint=intent.entities)
     dup = await item_svc.find_duplicate(session, user.id, extracted.title)
     if dup is not None:
-        return f"Already in your queue: #{dup.id} {dup.title}"
+        changes = await item_svc.merge_into(session, dup, extracted)
+        note = f"\n   updated: {'; '.join(changes)}" if changes else ""
+        if dup.status == "open":
+            return f"Already in your queue: #{dup.id} {dup.title}{note}"
+        item_svc.reopen(dup)
+        await session.flush()
+        return f"You finished #{dup.id} {dup.title} before - reopened it.{note}"
 
     item = await item_svc.create_item(session, user.id, extracted, raw_message_id=intent.entities.get("_raw_id"))
     log.info(
@@ -243,7 +250,7 @@ async def handle_message(
     session_factory: async_sessionmaker | None = None,
 ) -> str | None:
     """Process one user message. Returns the reply, or None for duplicate updates."""
-    text = (text or "").strip()
+    text = clean_input(text)
     if not text and forced is None:
         return "Send me a topic, task or question - or /help."
 

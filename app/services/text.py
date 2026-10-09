@@ -234,3 +234,75 @@ def chunk_message(text: str, limit: int = 4000) -> list[str]:
     if current:
         chunks.append(current)
     return chunks
+
+
+# ── duplicate detection ─────────────────────────────────────────────────────
+
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏  ﻿]")
+
+
+def clean_input(text: str | None) -> str:
+    """Drop control/zero-width chars (Postgres rejects NUL) and normalize newlines."""
+    return _CONTROL_RE.sub("", (text or "").replace("\r\n", "\n").replace("\r", "\n")).strip()
+
+
+def _fuzzy_equal(a: str, b: str) -> bool:
+    """Typo-tolerant token match; only for longer purely alphabetic words."""
+    if a == b:
+        return True
+    if not (a.isalpha() and b.isalpha()) or min(len(a), len(b)) < 5:
+        return False
+    if a.startswith(b) or b.startswith(a):
+        return abs(len(a) - len(b)) <= 2
+    from difflib import SequenceMatcher
+
+    return SequenceMatcher(None, a, b).ratio() >= 0.85
+
+
+def _matched(a: set[str], b: set[str]) -> int:
+    used: set[str] = set()
+    hits = 0
+    for x in sorted(a):
+        for y in sorted(b - used):
+            if _fuzzy_equal(x, y):
+                used.add(y)
+                hits += 1
+                break
+    return hits
+
+
+# Effort/framing words that don't change *what* the item is about.
+_DEDUPE_NOISE = frozenset({"deep", "dive", "quick", "about", "into", "re", "revisit", "again", "more"})
+
+
+def _sim_tokens(text: str | None) -> set[str]:
+    """Like token_set, but keeps single digits ("Part 1" vs "Part 2") and drops framing words."""
+    out = set(tokens(text))
+    out.update(w for w in _WORD_RE.findall((text or "").lower()) if w.isdigit())
+    return out - _DEDUPE_NOISE
+
+
+def title_similarity(a: str | None, b: str | None) -> float:
+    """0..1 — how likely two titles describe the same thing.
+
+    Exact normalized match → 1.0. Otherwise the larger of
+    - Jaccard over content tokens (typo-tolerant), and
+    - containment (all tokens of the shorter title appear in the longer one),
+      only when the shorter title has ≥ 2 tokens, so "Kafka" ≠ "Kafka streams".
+    """
+    na = " ".join(re.findall(r"[a-z0-9+#]+", (a or "").lower()))
+    nb = " ".join(re.findall(r"[a-z0-9+#]+", (b or "").lower()))
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    ta, tb = _sim_tokens(a), _sim_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    if ta == tb:
+        return 0.97
+    hits = _matched(ta, tb)
+    jaccard = hits / (len(ta) + len(tb) - hits)
+    small = min(len(ta), len(tb))
+    containment = hits / small if small >= 2 else 0.0
+    return max(jaccard, containment * 0.9)

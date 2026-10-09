@@ -13,7 +13,9 @@ from pathlib import Path
 _TMP = Path(tempfile.mkdtemp(prefix="kl-tests-"))
 os.environ.update(
     {
-        "DATABASE_URL": f"sqlite+aiosqlite:///{(_TMP / 'test.db').as_posix()}",
+        # KL_TEST_DATABASE_URL=postgresql://... runs the suite against real Postgres.
+        "DATABASE_URL": os.environ.get("KL_TEST_DATABASE_URL")
+        or f"sqlite+aiosqlite:///{(_TMP / 'test.db').as_posix()}",
         "TELEGRAM_BOT_TOKEN": "123456:TEST-TOKEN",
         "WEBHOOK_SECRET": "",
         "WEBHOOK_URL": "",
@@ -38,14 +40,15 @@ from app.llm import client as llm_client  # noqa: E402
 
 
 # ── SQLite: make SAVEPOINT (session.begin_nested) work under aiosqlite ──────
-@event.listens_for(db_engine.engine.sync_engine, "connect")
-def _sqlite_connect(dbapi_connection, _record):
-    dbapi_connection.isolation_level = None
+if db_engine.engine.dialect.name == "sqlite":
 
+    @event.listens_for(db_engine.engine.sync_engine, "connect")
+    def _sqlite_connect(dbapi_connection, _record):
+        dbapi_connection.isolation_level = None
 
-@event.listens_for(db_engine.engine.sync_engine, "begin")
-def _sqlite_begin(conn):
-    conn.exec_driver_sql("BEGIN")
+    @event.listens_for(db_engine.engine.sync_engine, "begin")
+    def _sqlite_begin(conn):
+        conn.exec_driver_sql("BEGIN")
 
 
 # ── network guard ───────────────────────────────────────────────────────────

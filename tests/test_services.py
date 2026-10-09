@@ -59,12 +59,33 @@ async def test_create_and_list_items(session, user):
     assert await item_svc.count_items(session, user.id) == 2
 
 
-async def test_find_duplicate_is_case_insensitive_and_open_only(session, user):
+async def test_find_duplicate_is_case_insensitive_and_covers_done_items(session, user):
     a = await _item(session, user, "Learn Kafka")
     assert (await item_svc.find_duplicate(session, user.id, "learn kafka")).id == a.id
     item_svc.mark_done(a)
     await session.commit()
-    assert await item_svc.find_duplicate(session, user.id, "learn kafka") is None
+    assert (await item_svc.find_duplicate(session, user.id, "learn kafka")).id == a.id
+    assert await item_svc.find_duplicate(session, user.id, "learn kafka", include_done=False) is None
+
+
+async def test_find_duplicate_prefers_open_item(session, user):
+    done = await _item(session, user, "Kafka consumer groups")
+    item_svc.mark_done(done)
+    await session.commit()
+    open_ = await _item(session, user, "Kafka Consumer Groups")
+    assert (await item_svc.find_duplicate(session, user.id, "kafka consumer groups")).id == open_.id
+
+
+async def test_merge_into_fills_gaps_only(session, user):
+    a = await _item(session, user, "Kafka consumer groups", tags=["kafka"], energy="low")
+    changes = await item_svc.merge_into(
+        session, a,
+        ExtractedItem(title="x", time_hint="by Friday", energy="high", summary="s", tags=["kafka", "streaming"]),
+    )
+    assert a.time_hint == "by Friday" and a.energy == "low" and a.summary == "s"
+    assert sorted(t.name for t in a.tags) == ["kafka", "streaming"]
+    assert changes == ["time → by Friday", "added summary", "tags + #streaming"]
+    assert await item_svc.merge_into(session, a, ExtractedItem(title="x")) == []
 
 
 async def test_find_matches_by_id_and_title(session, user):

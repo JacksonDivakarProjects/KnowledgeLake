@@ -47,6 +47,7 @@ Just type naturally:
 | You say | What happens |
 |---|---|
 | `learn kafka consumer groups this weekend` | saved as an item (type, tags, time hint extracted) |
+| `learn kafka consumer groups` (again) | "Already in your queue: #3 …" — no duplicate; new details merged |
 | `remind me to email Priya by Friday, quick one` | saved as a low-energy action due Friday |
 | `what should I focus on?` / `what's next` | top 5 open items, ranked, with reasons |
 | `what should I study for kafka` | ranked picks filtered to kafka |
@@ -77,15 +78,31 @@ curl -X POST localhost:8080/debug/message  -H "Content-Type: application/json" -
 ## Tests
 
 ```bash
-pytest                                # ~300 offline tests (SQLite + fake LLM, no network)
+pytest                                # ~430 offline tests (SQLite + fake LLM, no network)
 KL_LIVE_TESTS=1 pytest -m live -s     # optional smoke tests against the real Groq/NVIDIA keys in .env
 ```
+
+Run the same suite against a real Postgres (same engine as Neon):
+
+```bash
+docker run -d --name kl-test-pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=kltest -p 55432:5432 postgres:16
+KL_TEST_DATABASE_URL=postgresql://postgres:test@localhost:55432/kltest pytest
+docker rm -f kl-test-pg
+```
+
+Coverage includes: every intent end-to-end, multi-intent messages, LLM outage / garbage output,
+provider failover, duplicates, ranking, and odd inputs (emoji, Hindi/Chinese/Arabic, NUL bytes,
+SQL injection, HTML, 12k-char messages, prompt injection, malformed LLM entities).
 
 ## Reliability notes
 
 - If Groq fails, NVIDIA is tried, then deterministic rules, so every message gets a reply.
 - Read timeouts and 4xx errors fail over to the next provider immediately; 429/5xx/connect errors are retried once.
 - Each intent runs in its own savepoint; duplicate Telegram updates are ignored.
+- **No duplicate items:** re-logging a topic (same words, rephrased, plural, typo, extra filler)
+  matches the existing item instead of creating a new one. New details (deadline, tags, energy)
+  are merged in; a re-logged *done* item is reopened. Different numbers stay distinct
+  ("Q3 report" ≠ "Q4 report"), as do broader/narrower topics ("Kafka" ≠ "Kafka streams").
 - Every message and classification is logged to `raw_messages` / `intent_logs` for later evaluation.
 
 ## Publishing a new image

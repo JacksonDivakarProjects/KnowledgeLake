@@ -47,15 +47,50 @@ async def create_item(
     return item
 
 
-async def find_duplicate(session: AsyncSession, user_id: int, title: str) -> Item | None:
-    """An open item with the same title (case-insensitive)."""
-    return (
-        await session.execute(
-            select(Item)
-            .where(Item.user_id == user_id, Item.status == "open", func.lower(Item.title) == title.lower())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+DUPLICATE_THRESHOLD = 0.75
+
+
+async def find_duplicate(
+    session: AsyncSession, user_id: int, title: str, *, include_done: bool = True
+) -> Item | None:
+    """The existing item that `title` most likely re-logs, or None.
+
+    Open items win over done ones; among equals the most similar, then newest.
+    """
+    candidates = []
+    for item in await list_items(session, user_id, status=None if include_done else "open"):
+        score = T.title_similarity(title, item.title)
+        if score >= DUPLICATE_THRESHOLD:
+            candidates.append((item.status == "open", score, item.id, item))
+    return max(candidates, key=lambda c: c[:3])[3] if candidates else None
+
+
+def _tag_canon(name: str) -> str:
+    """'consumer-groups' and 'consumer_group' are the same tag for merging purposes."""
+    return re.sub(r"[^a-z0-9+#]", "", name.lower()).rstrip("s")
+
+
+async def merge_into(session: AsyncSession, item: Item, extracted: ExtractedItem) -> list[str]:
+    """Fill gaps on an existing item from a re-log. Returns what changed (human readable)."""
+    changes: list[str] = []
+    if extracted.time_hint and extracted.time_hint != item.time_hint:
+        item.time_hint = extracted.time_hint
+        changes.append(f"time → {extracted.time_hint}")
+    if extracted.energy and not item.energy:
+        item.energy = extracted.energy
+        changes.append(f"energy → {extracted.energy}")
+    if extracted.summary and not item.summary:
+        item.summary = extracted.summary
+        changes.append("added summary")
+    have = {t.name for t in item.tags}
+    have_canon = {_tag_canon(t) for t in have}
+    new_names = [t for t in extracted.tags if _tag_canon(t) not in have_canon]
+    if new_names and len(have) < 6:
+        new_tags = await upsert_tags(session, item.user_id, new_names[: 6 - len(have)])
+        item.tags = list(item.tags) + new_tags
+        changes.append("tags + " + ", ".join(f"#{t.name}" for t in new_tags))
+    await session.flush()
+    return changes
 
 
 async def list_items(session: AsyncSession, user_id: int, status: str | None = "open", limit: int = SCAN_LIMIT) -> list[Item]:
