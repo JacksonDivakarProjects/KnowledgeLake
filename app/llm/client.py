@@ -1,6 +1,6 @@
 """Unified chat-completion client.
 
-Groq primary (openai/gpt-oss-*), NVIDIA NIM fallback (google/gemma-4-31b-it).
+Groq primary (openai/gpt-oss-*), NVIDIA NIM fallback (nvidia/nemotron-3-super-120b-a12b).
 Both expose OpenAI-compatible /v1/chat/completions. Provider order comes
 from KL_LLM_PROVIDER_ORDER. Missing key => provider skipped with a warning.
 

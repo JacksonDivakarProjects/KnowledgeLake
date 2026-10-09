@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # LLM — NVIDIA fallback
     nvidia_api_key: str = ""
-    nvidia_model: str = "google/gemma-4-31b-it"
+    nvidia_model: str = "nvidia/nemotron-3-super-120b-a12b"
 
     # LLM — general
     kl_llm_provider_order: str = "groq,nvidia"
