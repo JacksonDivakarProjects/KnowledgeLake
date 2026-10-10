@@ -49,3 +49,14 @@ def test_settings_strip_inline_comments(monkeypatch):
     assert s.kl_mode == "polling" and s.webhook_url == "" and s.kl_log_level == "INFO"
     monkeypatch.setenv("WEBHOOK_URL", "# only for webhook")  # docker compose trims leading spaces
     assert Settings().webhook_url == ""
+
+
+def test_webhook_full_url_appends_path(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "webhook_secret", "abc")
+    monkeypatch.setattr(settings, "webhook_url", "https://x.run.app/")
+    assert settings.webhook_full_url == "https://x.run.app/webhook/abc"
+    monkeypatch.setattr(settings, "webhook_url", "https://x.run.app/webhook/abc")
+    assert settings.webhook_full_url == "https://x.run.app/webhook/abc"
+    monkeypatch.setattr(settings, "webhook_url", "")
+    assert settings.webhook_full_url == ""

@@ -51,6 +51,14 @@ class Settings(BaseSettings):
         return v.lower() if v.lower() in ("polling", "webhook") else v.upper()
 
     @property
+    def webhook_full_url(self) -> str:
+        """WEBHOOK_URL may be just the service base URL; append /webhook/<secret> if missing."""
+        base = self.webhook_url.rstrip("/")
+        if not base or "/webhook/" in base:
+            return base
+        return f"{base}/webhook/{self.webhook_secret or 'telegram'}"
+
+    @property
     def provider_order(self) -> list[str]:
         return [p.strip() for p in self.kl_llm_provider_order.split(",") if p.strip()]
 

@@ -42,13 +42,13 @@ async def lifespan(app: FastAPI):
             # Cloud Run would report it only as "failed to start".
             try:
                 await ptb.bot.set_webhook(
-                    url=settings.webhook_url,
+                    url=settings.webhook_full_url,
                     secret_token=settings.webhook_secret or None,
                     drop_pending_updates=False,
                 )
-                log.info("Telegram webhook registered: %s", settings.webhook_url)
+                log.info("Telegram webhook registered: %s", settings.webhook_full_url)
             except Exception as e:
-                log.error("set_webhook failed for %r: %s", settings.webhook_url, e)
+                log.error("set_webhook failed for %r: %s", settings.webhook_full_url, e)
         else:
             log.warning("KL_MODE=webhook but WEBHOOK_URL is empty - not registering")
     else:
