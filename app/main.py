@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -23,7 +24,8 @@ state: dict = {"ptb": None}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        await init_db()
+        # Bounded so a slow/unreachable DB can't exceed Cloud Run's startup timeout.
+        await asyncio.wait_for(init_db(), timeout=20)
     except Exception as e:
         log.error("init_db failed: %s", e)
 
@@ -36,12 +38,17 @@ async def lifespan(app: FastAPI):
         log.info("Telegram polling started")
     elif settings.kl_mode == "webhook":
         if settings.webhook_url:
-            await ptb.bot.set_webhook(
-                url=settings.webhook_url,
-                secret_token=settings.webhook_secret or None,
-                drop_pending_updates=False,
-            )
-            log.info("Telegram webhook registered: %s", settings.webhook_url)
+            # Never let a bad WEBHOOK_URL stop the server from listening on PORT;
+            # Cloud Run would report it only as "failed to start".
+            try:
+                await ptb.bot.set_webhook(
+                    url=settings.webhook_url,
+                    secret_token=settings.webhook_secret or None,
+                    drop_pending_updates=False,
+                )
+                log.info("Telegram webhook registered: %s", settings.webhook_url)
+            except Exception as e:
+                log.error("set_webhook failed for %r: %s", settings.webhook_url, e)
         else:
             log.warning("KL_MODE=webhook but WEBHOOK_URL is empty - not registering")
     else:
@@ -138,5 +145,7 @@ async def webhook(
 
     data = await request.json()
     update = Update.de_json(data, ptb.bot)
-    await ptb.update_queue.put(update)
+    # Process inline (not via update_queue): Cloud Run throttles CPU once the
+    # response is sent, so background processing would stall and never reply.
+    await ptb.process_update(update)
     return {"ok": True}
