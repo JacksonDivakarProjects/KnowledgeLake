@@ -183,7 +183,7 @@ async def test_unknown_gives_guided_menu(say, fake_llm):
     assert "Here's what I can do" in reply and "what should I focus on?" in reply
 
 
-async def test_menu_keyboard_is_attached_to_replies(monkeypatch):
+async def test_replies_hide_menu_keyboard(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -199,4 +199,16 @@ async def test_menu_keyboard_is_attached_to_replies(monkeypatch):
         effective_chat=SimpleNamespace(id=1), effective_message=msg,
     )
     await handlers.free_text(upd, SimpleNamespace(args=[], bot=SimpleNamespace(send_chat_action=AsyncMock())))
+    assert msg.reply_text.await_args.kwargs["reply_markup"] is handlers.HIDE_MENU
+
+
+async def test_menu_command_shows_keyboard():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.telegram import handlers
+
+    msg = SimpleNamespace(text="/menu", reply_text=AsyncMock())
+    upd = SimpleNamespace(effective_user=SimpleNamespace(id=1), effective_message=msg)
+    await handlers.menu_cmd(upd, SimpleNamespace(args=[]))
     assert msg.reply_text.await_args.kwargs["reply_markup"] is handlers.MENU

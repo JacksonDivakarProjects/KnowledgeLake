@@ -45,6 +45,7 @@ HELP_TEXT = (
     "/tags - tags in use\n"
     "/context - your focus & goals\n"
     "/setfocus <topic> · /goal <goal> · /energy <low|medium|high>\n"
+    "/menu - quick-action buttons\n"
     "/help - this message"
 )
 

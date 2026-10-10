@@ -7,6 +7,7 @@ from app.telegram import handlers
 COMMANDS = [
     ("start", "wake the bot", handlers.start),
     ("help", "what I can do", handlers.help_cmd),
+    ("menu", "quick-action buttons", handlers.menu_cmd),
     ("add", "store something", handlers.add_cmd),
     ("queue", "list open items", handlers.queue_cmd),
     ("focus", "what to work on next", handlers.focus_cmd),

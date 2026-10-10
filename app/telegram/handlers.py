@@ -5,7 +5,7 @@ so they work even when every LLM provider is down.
 """
 import logging
 
-from telegram import ReplyKeyboardMarkup, Update
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
@@ -23,8 +23,8 @@ START_TEXT = (
 )
 
 
-# Persistent quick-reply menu. Each button just sends its text, which the rules
-# fast-path routes without an LLM call (leading emoji is ignored).
+# Quick-reply menu, shown only on /menu. Each button just sends its text, which
+# the rules fast-path routes without an LLM call (leading emoji is ignored).
 MENU_BUTTONS = [
     ["🎯 What should I focus on?", "📋 Show my queue"],
     ["🏷 Show my tags", "🧭 What are my goals"],
@@ -33,12 +33,17 @@ MENU_BUTTONS = [
 MENU = ReplyKeyboardMarkup(
     MENU_BUTTONS,
     resize_keyboard=True,
-    is_persistent=True,
+    one_time_keyboard=True,
     input_field_placeholder="Type a topic, task or question…",
 )
 
 
-async def _reply(update: Update, text: str | None) -> None:
+# Normal replies clear the keyboard (also removes the old always-on menu from
+# chats that still have it).
+HIDE_MENU = ReplyKeyboardRemove()
+
+
+async def _reply(update: Update, text: str | None, markup=HIDE_MENU) -> None:
     if not text or update.effective_message is None:
         return
     chunks = chunk_message(text)
@@ -46,7 +51,7 @@ async def _reply(update: Update, text: str | None) -> None:
         await update.effective_message.reply_text(
             chunk,
             disable_web_page_preview=True,
-            reply_markup=MENU if n == len(chunks) - 1 else None,
+            reply_markup=markup if n == len(chunks) - 1 else None,
         )
 
 
@@ -95,6 +100,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.info("telegram /help from user=%s", update.effective_user.id)
     await _reply(update, HELP_TEXT)
+
+
+async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _reply(update, "Pick one:", markup=MENU)
 
 
 async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
